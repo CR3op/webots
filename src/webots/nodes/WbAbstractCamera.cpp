@@ -187,6 +187,8 @@ void WbAbstractCamera::deleteWren() {
 void WbAbstractCamera::initializeImageMemoryMappedFile() {
   mSendMemoryMappedFile = true;
   delete mImageMemoryMappedFile;
+  mImageMemoryMappedFile = NULL;
+  mImageData = NULL;
   mImageMemoryMappedFile = initializeMemoryMappedFile();
   if (mImageMemoryMappedFile)
     mImageData = static_cast<unsigned char *>(mImageMemoryMappedFile->data());
@@ -196,21 +198,33 @@ WbMemoryMappedFile *WbAbstractCamera::initializeMemoryMappedFile(const QString &
   // On Linux, we need to use memory mapped files named snap.webots.* to be compliant with the strict confinement policy of snap
   // applications.
   const QString folder = WbStandardPaths::webotsTmpPath() + "ipc/" + QUrl::toPercentEncoding(robot()->name());
-  const QString memoryMappedFileName = folder + "/snap.webots." + QUrl::toPercentEncoding(name()) + id;
   QDir().mkdir(folder);
-  WbMemoryMappedFile *imageMemoryMappedFile = new WbMemoryMappedFile(memoryMappedFileName);
-  // A controller of the previous simulation may have not released cleanly the memory mapped file (e.g. when the controller
-  // crashes). This can be detected by trying to attach, and the memory mapped file may be cleaned by detaching.
-  if (imageMemoryMappedFile->attach())
-    imageMemoryMappedFile->detach();
-  if (!imageMemoryMappedFile->create(size())) {
+
+  // Callers bump cCameraNumber before every allocation. The generation is part of the
+  // name so a controller that still maps the previous segment can be switched over.
+  // On Windows, QSharedMemory::create() fails with AlreadyExists for a name that is
+  // still mapped, which used to leave a dangling image pointer and crash on the next step.
+  WbMemoryMappedFile *imageMemoryMappedFile = NULL;
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    if (attempt > 0)
+      cCameraNumber++;
+    const QString memoryMappedFileName = folder + "/snap.webots." + QUrl::toPercentEncoding(name()) + id + "." +
+                                         QString::number(cCameraNumber);
+    imageMemoryMappedFile = new WbMemoryMappedFile(memoryMappedFileName);
+    // A controller of the previous simulation may have not released cleanly the memory mapped file (e.g. when the controller
+    // crashes). This can be detected by trying to attach, and the memory mapped file may be cleaned by detaching.
+    if (imageMemoryMappedFile->attach())
+      imageMemoryMappedFile->detach();
+    if (imageMemoryMappedFile->create(size()))
+      return imageMemoryMappedFile;
+
     const QString message =
       tr("Cannot allocate memory mapped file for camera image.\nCaused by: %1.").arg(imageMemoryMappedFile->errorString());
     warn(message);
     delete imageMemoryMappedFile;
-    return NULL;
+    imageMemoryMappedFile = NULL;
   }
-  return imageMemoryMappedFile;
+  return NULL;
 }
 
 void WbAbstractCamera::setup() {
@@ -228,9 +242,9 @@ void WbAbstractCamera::setup() {
 
   if (isPlanarProjection()) {
     updateFrustumDisplay();
-    connect(mWrenCamera, &WbWrenCamera::cameraInitialized, this, &WbAbstractCamera::updateFrustumDisplay);
+    connect(mWrenCamera, &WbWrenCamera::cameraInitialized, this, &WbAbstractCamera::updateFrustumDisplay, Qt::UniqueConnection);
     connect(WbWrenRenderingContext::instance(), &WbWrenRenderingContext::optionalRenderingChanged, this,
-            &WbAbstractCamera::updateFrustumDisplayIfNeeded);
+            &WbAbstractCamera::updateFrustumDisplayIfNeeded, Qt::UniqueConnection);
   }
 }
 
@@ -282,7 +296,7 @@ void WbAbstractCamera::computeValue() {
 }
 
 void WbAbstractCamera::copyImageToMemoryMappedFile(WbWrenCamera *camera, unsigned char *data) {
-  if (camera) {
+  if (camera && data) {
     camera->enableCopying(true);
     camera->copyContentsToMemory(data);
   }
@@ -653,14 +667,28 @@ void WbAbstractCamera::updateProjection() {
   mNeedToConfigure = true;
 
   if (hasBeenSetup()) {
+    // setup() is only for the first enable. Calling it again bumps the global camera
+    // counter, stacks frustum signal connections, and recreates the shared-memory
+    // segment under a name the controller may still have mapped.
     wr_node_set_visible(WR_NODE(mFrustumDisplayTransform), false);
-    setup();
+    resetMemoryMappedFile();
+    applyProjectionToWren();
+    createWrenOverlay();
+    if (isPlanarProjection())
+      updateFrustumDisplay();
+    else
+      wr_node_set_visible(WR_NODE(mFrustumDisplayTransform), false);
   }
 
   if (areWrenObjectsInitialized())
     applyFrustumToWren();
 
   updateFieldOfView();
+}
+
+void WbAbstractCamera::applyProjectionToWren() {
+  if (mWrenCamera)
+    mWrenCamera->setProjection(mProjection->value());
 }
 
 void WbAbstractCamera::updateAntiAliasing() {

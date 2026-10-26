@@ -21,6 +21,7 @@
 #include "wren/texture.h"
 
 #include <QtCore/QObject>
+#include <QtCore/QString>
 #include <QtCore/QVector>
 
 class QIODevice;
@@ -82,6 +83,9 @@ public:
   void setMinRange(float minRange);
   void setMaxRange(float maxRange);
   void setFieldOfView(float fov);
+  // Rebuild the framebuffers for a new projection without allocating the
+  // per-orientation post-processing helpers again.
+  void setProjection(const QString &projection);
   void setColorNoise(float colorNoise);
   void setRangeNoise(float rangeNoise);
   void setRangeResolution(float resolution);

@@ -900,6 +900,25 @@ void WbCamera::removeOccludedRecognizedObjects() {
   }
 }
 
+void WbCamera::applyProjectionToWren() {
+  WbAbstractCamera::applyProjectionToWren();
+  if (mSegmentationCamera)
+    mSegmentationCamera->setProjection(mProjection->value());
+
+  // cleanup() inside setProjection drops the noise-mask texture. Restore it
+  // without letting cameraInitialized rotate the camera a second time.
+  if (mWrenCamera && mNoiseMaskUrl && !mNoiseMaskUrl->value().isEmpty()) {
+    mWrenCamera->blockSignals(true);
+    updateNoiseMaskUrl();
+    mWrenCamera->blockSignals(false);
+    updateCameraOrientation();
+    updateLensFlare();
+  }
+  updateExposure();
+  updateBloomThreshold();
+  updateAmbientOcclusionRadius();
+}
+
 void WbCamera::createWrenCamera() {
   // Safely detach lens flare postProcessingEffect from camera viewport (before it is deleted)
   if (lensFlare())
@@ -927,8 +946,8 @@ void WbCamera::createWrenCamera() {
 
   updateLensFlare();
   updateCameraOrientation();
-  connect(mWrenCamera, &WbWrenCamera::cameraInitialized, this, &WbCamera::updateLensFlare);
-  connect(mWrenCamera, &WbWrenCamera::cameraInitialized, this, &WbCamera::updateCameraOrientation);
+  connect(mWrenCamera, &WbWrenCamera::cameraInitialized, this, &WbCamera::updateLensFlare, Qt::UniqueConnection);
+  connect(mWrenCamera, &WbWrenCamera::cameraInitialized, this, &WbCamera::updateCameraOrientation, Qt::UniqueConnection);
 
   if (mSegmentationCamera) {
     updateSegmentationCameraOrientation();
@@ -983,10 +1002,10 @@ void WbCamera::setup() {
   updateExposure();
   updateAmbientOcclusionRadius();
   updateBloomThreshold();
-  connect(mNoiseMaskUrl, &WbSFString::changed, this, &WbCamera::updateNoiseMaskUrl);
+  connect(mNoiseMaskUrl, &WbSFString::changed, this, &WbCamera::updateNoiseMaskUrl, Qt::UniqueConnection);
 
   // make sure bounding sphere is updated when object's size and position changes
-  if (recognition()) {
+  if (recognition() && !mIsSubscribedToRayTracing) {
     mIsSubscribedToRayTracing = true;
     WbSimulationState::instance()->subscribeToRayTracing();
   }

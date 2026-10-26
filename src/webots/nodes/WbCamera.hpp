@@ -103,6 +103,7 @@ private:
 
   // WREN methods
   void createWrenCamera() override;
+  void applyProjectionToWren() override;
   void createWrenOverlay() override;
   void createLensFlare();
 

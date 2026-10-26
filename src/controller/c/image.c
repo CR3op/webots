@@ -30,26 +30,26 @@
 #include <stdlib.h>
 
 Image *image_new() {
-  Image *i = malloc(sizeof(Image));
-  i->filename = NULL;
-  i->size = 0;
-  i->data = NULL;
+  Image *i = calloc(1, sizeof(Image));
   return i;
 }
 
 void image_cleanup(Image *i) {
-  if (i->size <= 0)
-    return;
-
 #ifdef _WIN32
   if (i->fd != NULL) {
-    UnmapViewOfFile(i->data);
+    if (i->data != NULL)
+      UnmapViewOfFile(i->data);
     CloseHandle(i->fd);
+    i->fd = NULL;
   }
 #else
-  if (i->data > 0)
+  if (i->data != NULL && i->size > 0)
     munmap(i->data, i->size);
 #endif
+  free(i->filename);
+  i->filename = NULL;
+  i->data = NULL;
+  i->size = 0;
 }
 
 void image_setup(Image *i, WbRequest *r) {
