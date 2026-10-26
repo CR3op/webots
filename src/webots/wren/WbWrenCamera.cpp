@@ -94,7 +94,12 @@ WbWrenCamera::WbWrenCamera(WrTransform *node, int width, int height, float nearV
   else
     assert(false);
 
+  mResultFrameBuffer = NULL;
   for (int i = 0; i < CAMERA_ORIENTATION_COUNT; ++i) {
+    mCamera[i] = NULL;
+    mCameraViewport[i] = NULL;
+    mCameraFrameBuffer[i] = NULL;
+    mIsCameraActive[i] = false;
     mWrenBloom[i] = new WbWrenBloom();
     mWrenColorNoise[i] = new WbWrenColorNoise();
     mWrenDepthOfField[i] = new WbWrenDepthOfField();
@@ -181,6 +186,25 @@ void WbWrenCamera::setMaxRange(float maxRange) {
   }
 
   setBackgroundColor(WbRgb(mMaxRange, mMaxRange, mMaxRange));
+}
+
+void WbWrenCamera::setProjection(const QString &projection) {
+  CameraProjection mode;
+  if (projection == "planar")
+    mode = PLANAR_PROJECTION;
+  else if (projection == "spherical")
+    mode = SPHERICAL_PROJECTION;
+  else if (projection == "cylindrical")
+    mode = CYLINDRICAL_PROJECTION;
+  else
+    return;
+  if (mode == mProjection)
+    return;
+
+  // cleanup() still needs the previous mode to release the right framebuffers.
+  cleanup();
+  mProjection = mode;
+  init();
 }
 
 void WbWrenCamera::setFieldOfView(float fov) {
@@ -649,7 +673,9 @@ void WbWrenCamera::cleanup() {
       mWrenSmaa[i]->detachFromViewport();
 
       wr_node_delete(WR_NODE(mCamera[i]));
+      mCamera[i] = NULL;
       wr_viewport_delete(mCameraViewport[i]);
+      mCameraViewport[i] = NULL;
 
       if (!isPlanarProjection()) {
         wr_texture_delete(WR_TEXTURE(wr_frame_buffer_get_output_texture(mCameraFrameBuffer[i], 0)));
@@ -659,6 +685,7 @@ void WbWrenCamera::cleanup() {
           wr_texture_delete(WR_TEXTURE(wr_frame_buffer_get_output_texture(mCameraFrameBuffer[i], 1)));
 
         wr_frame_buffer_delete(mCameraFrameBuffer[i]);
+        mCameraFrameBuffer[i] = NULL;
       }
     }
   }
@@ -671,6 +698,7 @@ void WbWrenCamera::cleanup() {
   wr_texture_delete(WR_TEXTURE(outputTexture));
 #endif
   wr_frame_buffer_delete(mResultFrameBuffer);
+  mResultFrameBuffer = NULL;
 
   wr_texture_delete(WR_TEXTURE(mNoiseMaskTexture));
   mNoiseMaskTexture = NULL;

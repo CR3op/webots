@@ -124,6 +124,7 @@ protected:
 
   // Wren methods
   virtual void createWrenCamera();
+  virtual void applyProjectionToWren();
   void createWrenOverlay() override;
   void deleteWren();
   virtual bool isFrustumEnabled() const { return false; }
